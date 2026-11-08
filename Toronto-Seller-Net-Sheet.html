@@ -1,0 +1,168 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Toronto Seller Net Sheet</title>
+<style>
+:root{--ink:#2B2D42;--bg:#F7F6F1;--card:#FFFFFF;--muted:#5B6168;--line:#E0E0E6;--good:#17704F;--accent:#EF8354;color-scheme:light}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){--ink:#F1F1F5;--bg:#17181F;--card:#22243000;--muted:#A3A7B5;--line:#33364A;--good:#6FD1A9;color-scheme:dark}}
+:root[data-theme="dark"]{--ink:#F1F1F5;--bg:#17181F;--card:#222430;--muted:#A3A7B5;--line:#33364A;--good:#6FD1A9;color-scheme:dark}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
+main{max-width:1000px;margin:0 auto;padding:24px 16px 48px}
+h1{font-size:24px;margin:0 0 6px}
+h2{font-size:16px;margin:0 0 10px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px;margin:0 0 14px}
+.note{color:var(--muted);font-size:13px}
+.scroll{overflow-x:auto}
+table{width:100%;border-collapse:collapse;min-width:640px}
+th,td{padding:6px 8px;border-bottom:1px solid var(--line);text-align:right;vertical-align:middle}
+th{font-weight:600;font-size:13px;color:var(--muted)}
+td:first-child,th:first-child{text-align:left;width:34%;color:var(--muted)}
+input{width:100%;padding:7px 8px;border:1px solid var(--line);border-radius:8px;background:transparent;color:var(--ink);font:inherit}
+.best{color:var(--good);font-weight:700}
+.settings{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px 14px}
+.settings label{display:block;font-size:13px;color:var(--muted);margin-bottom:4px}
+p{margin:0 0 8px}
+</style>
+</head>
+<body>
+<main>
+<h1>Toronto Seller Net Sheet</h1>
+<p class="note">Compare offers by what you actually take home, and find the lowest price that meets your target. Example figures are filled in. Replace them with your lawyer's estimate, your mortgage discharge statement, and your listing agreement.</p>
+
+<div class="card"><h2>Your costs</h2><div class="settings" id="globals"></div></div>
+<div class="card scroll"><h2>Offers</h2><table id="offers"></table></div>
+<div class="card scroll"><h2>Result</h2><table id="results"></table></div>
+<div class="card"><h2>Minimum price for your target</h2><p id="minprice"></p><p class="note">Assumes no credits, adjustments, or carrying costs.</p></div>
+
+<div class="card note">
+<p><strong>What "cash to you at closing" includes.</strong> The sale price, minus commission on both sides and the 13% HST on those commissions, minus the mortgage payout, any penalty, liens, legal fees, and disbursements, minus any credits the buyer asked for, plus or minus closing adjustments, minus carrying costs for the days you stay after closing.</p>
+<p>Costs you already paid to prepare the sale, such as staging, photos, and repairs, are not deducted from closing cash because you paid them out of pocket. They appear in "after prep costs," which shows what you actually keep.</p>
+<p>Land transfer tax is paid by the buyer, so it is not included. Any tax on the sale depends on your situation, including whether the property was your principal residence, so check with an accountant. This tool is an estimate, not legal or tax advice.</p>
+</div>
+</main>
+
+<script>
+const GLOBALS = [
+  {k:'listComm',label:'Listing agent commission (%)',step:0.1},
+  {k:'buyComm',label:'Buyer agent commission (%)',step:0.1},
+  {k:'hst',label:'HST on commissions (%)',step:0.5},
+  {k:'mortgage',label:'Mortgage payout ($)',step:1000},
+  {k:'penalty',label:'Prepayment penalty ($)',step:500},
+  {k:'liens',label:'Other liens or HELOC payout ($)',step:500},
+  {k:'legal',label:'Legal fees ($)',step:250},
+  {k:'disb',label:'Disbursements: title, registration, courier ($)',step:100},
+  {k:'prep',label:'Costs already paid to prepare the sale ($)',step:500},
+  {k:'carryDay',label:'Daily carrying cost after closing ($ per day)',step:5},
+  {k:'target',label:'Net you want after prep costs ($)',step:5000}
+];
+const DEFAULT_G = {listComm:2.5,buyComm:2.5,hst:13,mortgage:350000,penalty:4000,liens:0,legal:2000,disb:600,prep:8000,carryDay:35,target:650000};
+const OFFER_FIELDS = [
+  {k:'name',label:'Offer',type:'text'},
+  {k:'price',label:'Offer price ($)',step:1000},
+  {k:'credits',label:'Credits or repairs the buyer asked for ($)',step:500},
+  {k:'adj',label:'Other adjustments at closing, + or − ($)',step:100},
+  {k:'carryDays',label:'Days you stay after closing',step:1},
+  {k:'conditions',label:'Conditions',type:'text'}
+];
+const SAMPLE_OFFERS = [
+  {name:'Offer A',price:1050000,credits:0,adj:0,carryDays:0,conditions:'Financing, home inspection'},
+  {name:'Offer B',price:1075000,credits:12000,adj:0,carryDays:30,conditions:"Sale of buyer's home"},
+  {name:'Offer C',price:1040000,credits:0,adj:-2500,carryDays:0,conditions:'Financing only'}
+];
+let G = {...DEFAULT_G};
+let offers = SAMPLE_OFFERS.map(o => ({...o}));
+
+function num(v){ const n = parseFloat(v); return Number.isFinite(n) ? n : 0; }
+function money(n){ return (n < 0 ? '-$' : '$') + Math.abs(Math.round(n)).toLocaleString('en-US'); }
+function esc(s){ return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+function calc(o){
+  const price = num(o.price);
+  const commission = price * (num(G.listComm) + num(G.buyComm)) / 100;
+  const hst = commission * num(G.hst) / 100;
+  const payouts = num(G.mortgage) + num(G.penalty) + num(G.liens);
+  const legal = num(G.legal) + num(G.disb);
+  const credits = num(o.credits);
+  const adj = num(o.adj);
+  const carry = num(o.carryDays) * num(G.carryDay);
+  const cash = price - commission - hst - payouts - legal - credits + adj - carry;
+  return {price, commission, hst, payouts, legal, credits, adj, carry, cash,
+          pct: price ? cash / price * 100 : 0, afterPrep: cash - num(G.prep)};
+}
+
+function renderGlobals(){
+  document.getElementById('globals').innerHTML = GLOBALS.map(f =>
+    '<div><label for="g-' + f.k + '">' + f.label + '</label><input id="g-' + f.k + '" type="number" step="' + f.step + '" data-g="' + f.k + '" value="' + esc(G[f.k]) + '"></div>'
+  ).join('');
+}
+
+function renderOffers(){
+  let html = '<tr><th>Field</th>' + offers.map((o, i) => '<th>Offer ' + (i + 1) + '</th>').join('') + '</tr>';
+  OFFER_FIELDS.forEach(f => {
+    html += '<tr><td>' + f.label + '</td>' + offers.map((o, i) => {
+      const type = f.type === 'text' ? 'text' : 'number';
+      const step = f.step ? ' step="' + f.step + '"' : '';
+      return '<td><input type="' + type + '"' + step + ' data-i="' + i + '" data-k="' + f.k + '" value="' + esc(o[f.k] === undefined ? '' : o[f.k]) + '"></td>';
+    }).join('') + '</tr>';
+  });
+  document.getElementById('offers').innerHTML = html;
+}
+
+function renderResults(){
+  const res = offers.map(calc);
+  let best = 0;
+  res.forEach((r, i) => { if (r.cash > res[best].cash) best = i; });
+  const names = offers.map((o, i) => esc(o.name || ('Offer ' + (i + 1))));
+  const rows = [
+    ['Offer price', r => money(r.price)],
+    ['Commission, both sides', r => money(-r.commission)],
+    ['HST on commission', r => money(-r.hst)],
+    ['Mortgage, penalty, and liens', r => money(-r.payouts)],
+    ['Legal fees and disbursements', r => money(-r.legal)],
+    ['Credits or repairs requested', r => money(-r.credits)],
+    ['Closing adjustments', r => money(r.adj)],
+    ['Carrying costs after closing', r => money(-r.carry)],
+    ['Cash to you at closing', r => money(r.cash), true],
+    ['Cash as % of price', r => r.pct.toFixed(1) + '%'],
+    ['After prep costs (what you keep)', r => money(r.afterPrep)]
+  ];
+  let html = '<tr><th>Result</th>' + names.map(n => '<th>' + n + '</th>').join('') + '</tr>';
+  rows.forEach(row => {
+    html += '<tr><td>' + row[0] + '</td>' + res.map((r, i) => {
+      const cls = row[2] && i === best ? ' class="best"' : '';
+      return '<td' + cls + '>' + row[1](r) + '</td>';
+    }).join('') + '</tr>';
+  });
+  html += '<tr><td>Conditions</td>' + offers.map(o => '<td>' + esc(o.conditions || '') + '</td>').join('') + '</tr>';
+  html += '<tr><td>Highest cash at closing</td><td class="best" colspan="' + offers.length + '">' + names[best] + '</td></tr>';
+  document.getElementById('results').innerHTML = html;
+
+  const c = (num(G.listComm) + num(G.buyComm)) / 100 * (1 + num(G.hst) / 100);
+  const fixed = num(G.mortgage) + num(G.penalty) + num(G.liens) + num(G.legal) + num(G.disb);
+  const minPrice = c < 1 ? (num(G.target) + num(G.prep) + fixed) / (1 - c) : NaN;
+  document.getElementById('minprice').innerHTML = Number.isFinite(minPrice)
+    ? 'To keep <strong>' + money(num(G.target)) + '</strong> after prep costs, the price needs to be about <strong>' + money(minPrice) + '</strong>.'
+    : 'Check your commission and HST inputs.';
+}
+
+document.addEventListener('input', e => {
+  const t = e.target;
+  if (t.dataset.g !== undefined) {
+    G[t.dataset.g] = t.value;
+  } else if (t.dataset.k !== undefined) {
+    offers[+t.dataset.i][t.dataset.k] = t.value;
+  } else {
+    return;
+  }
+  renderResults();
+});
+
+renderGlobals();
+renderOffers();
+renderResults();
+</script>
+</body>
+</html>
